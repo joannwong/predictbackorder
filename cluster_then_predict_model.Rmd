@@ -1,0 +1,267 @@
+---
+title: "Predicting Product Backorder -- Cluster then Predict Model"
+output: html_document
+date: "2023-02-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caTools)
+library(caret)
+library(psych)
+library(flexclust)
+library(dplyr)
+library(e1071)
+library(ROCR)
+```
+
+Load data
+```{r}
+train = read.csv("Competition_Train.csv")
+test = read.csv("Competition_Test.csv")
+str(train)
+str(test)
+```
+
+Note: leave variables as int/ num for clustering. Change to factor variables before logistic regression.
+
+Data Preprocessing
+```{r}
+# Remove target variable (went on back order) and SKU variable.
+limitedTrain = train
+limitedTrain$sku = NULL
+limitedTrain$went_on_backorder = NULL 
+
+limitedTest = test
+limitedTest$sku = NULL
+
+# Preprocess & normalise train & test data 
+preproc = preProcess(limitedTrain)
+normTrain = predict(preproc, limitedTrain)
+normTest = predict(preproc, limitedTest)
+summary(normTrain)
+SD(normTrain, na.rm = TRUE)
+```
+
+--- K-MEANS CLUSTERING ---
+```{r}
+set.seed(1)
+km = kmeans(normTrain, centers = 4)
+
+km.kcca = as.kcca(km, normTrain)
+clusterTrain = predict(km.kcca)          
+clusterTest = predict(km.kcca, newdata = normTest)
+```
+
+--- LOGISTIC REGRESSION ---
+
+Data preprocessing
+
+# Test for multicollinearity 
+cor(train)
+# remove forecast 3 & 6 month
+# remove sales 1, 3, 6 month
+# remove perf 6 month avg 
+
+# Drop columns with multicollinearity 
+train_wo_mulcol = train %>% select(-c(forecast_3_month, forecast_6_month, sales_1_month, sales_3_month, sales_6_month, perf_6_month_avg))
+
+# Check multicollinearity
+cor(train_wo_mulcol)
+
+# remove min_bank?
+train_wo_mulcol = train_wo_mulcol %>% select(-min_bank)
+
+
+CROSS VALIDATION
+
+```{r}
+# Convert to factor variables -- TRAIN SET
+str(train) 
+train$potential_issue = as.factor(train$potential_issue)
+train[18:23] = lapply(train[18:23], as.factor) 
+```
+
+
+Prepare for Cross Validation 
+
+"No" = did not go on back order
+"Yes" = went on back order
+```{r}
+train$went_on_backorder = revalue(train$went_on_backorder, c("0"="No", "1"="Yes"))
+str(train) 
+```
+
+
+Build Cross Validation Models 
+
+```{r}
+fitControl = trainControl(method = "cv", number = 10, classProbs = TRUE, summaryFunction = twoClassSummary)
+```
+
+```{r}
+Train1 = subset(train, clusterTrain == 1)
+Train2 = subset(train, clusterTrain == 2)
+Train3 = subset(train, clusterTrain == 3)                   
+Train4 = subset(train, clusterTrain == 4)
+```
+
+--- Model 1 (Train1) ---
+
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_9_month + sales_9_month + potential_issue + pieces_past_due + perf_12_month_avg + local_bo_qty + deck_risk + ppap_risk + stop_auto_buy, data = Train1, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+lowest forecast/ sales/ performance months
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_3_month + sales_1_month + potential_issue + pieces_past_due + perf_6_month_avg + local_bo_qty + deck_risk + ppap_risk + stop_auto_buy, data = Train1, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+BEST MODEL1
+rm sales var
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_9_month + potential_issue + pieces_past_due + perf_12_month_avg + local_bo_qty + deck_risk + ppap_risk + stop_auto_buy, data = Train1, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+add min_bank, remove corr variables
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + potential_issue + pieces_past_due + local_bo_qty + min_bank + deck_risk + ppap_risk + stop_auto_buy, data = Train1, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+change around forecast/ sales/ performance months
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_3_month + sales_9_month + potential_issue + pieces_past_due + perf_6_month_avg + local_bo_qty + deck_risk + ppap_risk + stop_auto_buy, data = Train1, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+--- Model 2 (Train2) ---
+
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_9_month + sales_9_month + potential_issue + pieces_past_due + perf_12_month_avg + local_bo_qty + deck_risk + stop_auto_buy, data = Train2, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+BEST MODEL2
+lowest forecast/ sales/ performance months
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_3_month + sales_1_month + potential_issue + pieces_past_due + perf_6_month_avg + local_bo_qty + deck_risk + stop_auto_buy, data = Train2, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+rm forecast, perf vars
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_3_month + potential_issue + pieces_past_due + local_bo_qty + deck_risk + stop_auto_buy, data = Train2, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+--- Model 3 (Train3) ---
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_9_month + sales_9_month + potential_issue + pieces_past_due + perf_12_month_avg + local_bo_qty + deck_risk + oe_constraint + ppap_risk + stop_auto_buy + rev_stop, data = Train3, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+BEST MODEL3
+lowest forecast/ sales/ performance months
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_3_month + sales_1_month + potential_issue + pieces_past_due + perf_6_month_avg + local_bo_qty + deck_risk + oe_constraint + ppap_risk + stop_auto_buy + rev_stop, data = Train3, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+rm forecast var
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + sales_1_month + potential_issue + pieces_past_due + perf_12_month_avg + local_bo_qty + deck_risk + oe_constraint + ppap_risk + stop_auto_buy + rev_stop, data = Train3, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+--- Model 4 (Train4) ---
+
+BEST MODEL4
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_9_month + sales_9_month + potential_issue + pieces_past_due + perf_12_month_avg + local_bo_qty + deck_risk + stop_auto_buy, data = Train4, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+lowest forecast/ sales/ performance months
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_3_month + sales_1_month + potential_issue + pieces_past_due + perf_6_month_avg + local_bo_qty + deck_risk + stop_auto_buy, data = Train4, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+rm forecast, perf vars
+```{r}
+set.seed(1)
+train(went_on_backorder ~ national_inv + lead_time + in_transit_qty + sales_9_month + potential_issue + pieces_past_due + local_bo_qty + deck_risk + stop_auto_buy, data = Train4, method = "glm", family = "binomial", trControl = fitControl, metric = "ROC")
+```
+
+In Sample Testing
+
+FINAL MODELS 1-4
+```{r}
+Model1 = glm(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_9_month + potential_issue + pieces_past_due + perf_12_month_avg + local_bo_qty + deck_risk + ppap_risk + stop_auto_buy, data = Train1, family = "binomial")
+Model2 = glm(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_3_month + sales_1_month + potential_issue + pieces_past_due + perf_6_month_avg + local_bo_qty + deck_risk + stop_auto_buy, data = Train2, family = "binomial")
+Model3 = glm(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_3_month + sales_1_month + potential_issue + pieces_past_due + perf_6_month_avg + local_bo_qty + deck_risk + oe_constraint + ppap_risk + stop_auto_buy + rev_stop, data = Train3, family = "binomial")
+Model4 = glm(went_on_backorder ~ national_inv + lead_time + in_transit_qty + forecast_9_month + sales_9_month + potential_issue + pieces_past_due + perf_12_month_avg + local_bo_qty + deck_risk + stop_auto_buy, data = Train4, family = "binomial")
+```
+
+```{r}
+predictTrain1 = predict(Model1, type = "response")
+predictTrain2 = predict(Model2, type = "response")
+predictTrain3 = predict(Model3, type = "response")
+predictTrain4 = predict(Model4, type = "response")
+
+AllTrainPredictions = c(predictTrain1, predictTrain2, predictTrain3, predictTrain4)
+AllTrainOutcomes = c(Train1$went_on_backorder, Train2$went_on_backorder, Train3$went_on_backorder, Train4$went_on_backorder)
+
+```
+
+ROC
+```{r}
+ROCRpred = prediction(AllTrainPredictions, AllTrainOutcomes)
+ROCRperf = performance(ROCRpred, "tpr", "fpr")
+plot(ROCRperf)
+
+ROCRauc = performance(ROCRpred, "auc")
+ROCRauc@y.values 
+```
+
+OUT OF SAMPLE TESTING
+```{r}
+# Convert to factor variables -- TEST SET 
+test$potential_issue = as.factor(test$potential_issue)
+test[18:22] = lapply(test[18:22], as.factor)
+str(test)
+
+Test1 = subset(test, clusterTest == 1)
+Test2 = subset(test, clusterTest == 2)
+Test3 = subset(test, clusterTest == 3)
+Test4 = subset(test, clusterTest == 4)
+```
+
+```{r}
+predictTest1 = predict(Model1, newdata = Test1, type = "response")
+predictTest2 = predict(Model2, newdata = Test2, type = "response")
+predictTest3 = predict(Model3, newdata = Test3, type = "response")
+predictTest4 = predict(Model4, newdata = Test4, type = "response")
+```
+
+```{r}
+AllTestPredictions = c(predictTest1, predictTest2, predictTest3, predictTest4)
+TestSku = c(Test1$sku, Test2$sku, Test3$sku, Test4$sku)
+
+predTest = data.frame(TestSku, AllTestPredictions)
+str(predTest)
+summary(predTest)
+```
+
+```{r}
+colnames(predTest) = c("sku", "went_on_backorder")
+str(predTest)
+write.csv(predTest, "Submission1.csv", row.names = FALSE)
+```
+
+
