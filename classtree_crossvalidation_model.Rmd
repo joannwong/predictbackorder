@@ -1,0 +1,98 @@
+---
+title: "Classification Tree + Cross Validation"
+output: html_document
+date: "2023-03-16"
+---
+
+```{r}
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(e1071)
+```
+
+Load data
+```{r}
+train = read.csv("Competition_Train.csv")
+str(train)
+```
+
+Pre-processing
+```{r}
+train$potential_issue = as.factor(train$potential_issue)
+train[18:23] = lapply(train[18:23], as.factor)
+str(train)
+```
+
+CART
+```{r}
+Tree = rpart(went_on_backorder ~ . -sku, data = train, control = rpart.control(minbucket = 25))
+prp(Tree)
+```
+
+```{r}
+predictCART = predict(Tree, type = "prob")
+conf = table(train$went_on_backorder, predictCART)
+conf
+```
+
+CROSS VALIDATION
+- iteratively find best cp by zooming in on cp range with each iteration
+```{r}
+fitControl = trainControl(method = "cv", number = 10)
+```
+
+```{r}
+cpGrid = expand.grid(.cp = (1:20)*0.05)
+``` 
+
+```{r}
+set.seed(1)
+cvResults = train(went_on_backorder ~ national_inv + forecast_3_month + sales_1_month + sales_3_month, data = train, method = "rpart", trControl = fitControl, tuneGrid = cpGrid)
+cvResults
+```
+
+
+```{r}
+cpGrid = expand.grid(.cp = (1:15)*0.01)
+``` 
+
+```{r}
+set.seed(1)
+cvResults = train(went_on_backorder ~ national_inv + forecast_3_month + sales_1_month + sales_3_month, data = train, method = "rpart", trControl = fitControl, tuneGrid = cpGrid)
+cvResults
+```
+
+```{r}
+cpGrid = expand.grid(.cp = (1:20)*0.001)
+``` 
+
+```{r}
+set.seed(1)
+cvResults = train(went_on_backorder ~ national_inv + forecast_3_month + sales_1_month + sales_3_month, data = train, method = "rpart", trControl = fitControl, tuneGrid = cpGrid)
+cvResults
+```
+
+```{r}
+cpGrid = expand.grid(.cp = (1:20)*0.00005)
+``` 
+
+```{r}
+set.seed(1)
+cvResults = train(went_on_backorder ~ national_inv + forecast_3_month + sales_1_month + sales_3_month, data = train, method = "rpart", trControl = fitControl, tuneGrid = cpGrid)
+cvResults
+``` 
+
+
+```{r}
+TreeCV = rpart(went_on_backorder ~ national_inv + forecast_3_month + sales_1_month + sales_3_month, data = train, control = rpart.control(cp = cvResults["bestTune"]))
+prp(TreeCV)
+```
+
+```{r}
+predictCV = predict(TreeCV, type = "prob")
+confCV = table(train$went_on_backorder, predictCV)
+confCV
+```
+
+      
